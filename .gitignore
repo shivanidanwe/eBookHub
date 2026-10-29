@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build output and tooling caches
+dist/
+**/dist/
+.vite/
+**/.vite/
+coverage/
+**/coverage/
+
+# Local environment and secrets
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+!**/.env.example
+
+# User uploads and locally stored book files
+/uploads/
+**/uploads/
+
+# Logs and OS files
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+.DS_Store
+Thumbs.db

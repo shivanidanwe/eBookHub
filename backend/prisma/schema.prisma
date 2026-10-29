@@ -1,0 +1,614 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  USER
+  AUTHOR
+  ADMIN
+}
+
+enum UserStatus {
+  ACTIVE
+  BLOCKED
+  PENDING
+}
+
+enum AuthorStatus {
+  DRAFT
+  PENDING
+  APPROVED
+  REJECTED
+  SUSPENDED
+}
+
+enum BookStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  ARCHIVED
+}
+
+enum OrderStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CANCELLED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum PaymentProvider {
+  RAZORPAY
+  DEMO
+  UPI
+}
+
+enum PayoutStatus {
+  REQUESTED
+  UNDER_REVIEW
+  APPROVED
+  PROCESSING
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
+
+enum NotificationType {
+  ORDER
+  PAYMENT
+  BOOK_STATUS
+  AUTHOR_APPLICATION
+  PAYOUT
+  REVIEW
+  SYSTEM
+}
+
+enum TicketStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
+
+enum DiscountType {
+  PERCENTAGE
+  FIXED
+}
+
+enum LedgerType {
+  SALE_CREDIT
+  COMMISSION_DEBIT
+  PAYOUT_DEBIT
+  REFUND_REVERSAL
+}
+
+model User {
+  id                    String              @id @default(uuid())
+  email                 String              @unique
+  passwordHash          String
+  role                  Role                @default(USER)
+  status                UserStatus          @default(ACTIVE)
+  isEmailVerified       Boolean             @default(false)
+  emailVerifyToken      String?
+  resetPasswordToken    String?
+  resetPasswordExpires  DateTime?
+  createdAt             DateTime            @default(now())
+  updatedAt             DateTime            @updatedAt
+
+  profile               UserProfile?
+  authorProfile         AuthorProfile?
+  authorApplications    AuthorApplication[]
+  orders                Order[]
+  payments              Payment[]
+  cartItems             CartItem[]
+  wishlistItems         WishlistItem[]
+  entitlements          Entitlement[]
+  reviews               Review[]
+  readingProgress       ReadingProgress[]
+  bookmarks             Bookmark[]
+  notifications         Notification[]
+  supportTickets        SupportTicket[]
+  supportMessages       SupportMessage[]
+  couponRedemptions     CouponRedemption[]
+  auditLogs             AuditLog[]
+
+  @@map("users")
+}
+
+model UserProfile {
+  id                String    @id @default(uuid())
+  userId            String    @unique
+  fullName          String
+  mobile            String?
+  avatar            String?
+  preferredLanguage String    @default("English")
+  interests         String[]  @default([])
+  bio               String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  user              User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_profiles")
+}
+
+model AuthorProfile {
+  id                String         @id @default(uuid())
+  userId            String         @unique
+  fullName          String
+  mobile            String?
+  avatar            String?
+  bio               String?
+  expertise         String[]       @default([])
+  preferredLanguage String         @default("English")
+  status            AuthorStatus   @default(PENDING)
+  rejectionReason   String?
+  bankName          String?
+  accountNumber     String?
+  ifscCode          String?
+  upiId             String?
+  panNumber         String?
+  gstNumber         String?
+  availableBalance  Int            @default(0) // in paise (INR)
+  totalEarnings     Int            @default(0) // in paise (INR)
+  createdAt         DateTime       @default(now())
+  updatedAt         DateTime       @updatedAt
+
+  user              User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  books             Book[]
+  payoutRequests    PayoutRequest[]
+  ledgerEntries     LedgerEntry[]
+
+  @@map("author_profiles")
+}
+
+model AuthorApplication {
+  id             String        @id @default(uuid())
+  userId         String
+  fullName       String
+  email          String
+  mobile         String?
+  bio            String
+  expertise      String[]      @default([])
+  status         AuthorStatus  @default(PENDING)
+  adminNotes     String?
+  reviewedAt     DateTime?
+  reviewedBy     String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("author_applications")
+}
+
+model Category {
+  id           String    @id @default(uuid())
+  name         String    @unique
+  slug         String    @unique
+  description  String?
+  icon         String?
+  displayOrder Int       @default(0)
+  isFeatured   Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  books        Book[]
+
+  @@map("categories")
+}
+
+model Book {
+  id               String          @id @default(uuid())
+  slug             String          @unique
+  title            String
+  subtitle         String?
+  description      String
+  categoryId       String
+  authorId         String
+  price            Int             // in paise (e.g. 24900 for ₹249.00)
+  discountPrice    Int?            // in paise
+  coverImage       String?
+  language         String          @default("English")
+  isbn             String?
+  targetExam       String?         // e.g. "UPSC", "MPSC", "GATE", "JEE"
+  educationalLevel String?         // e.g. "Beginner", "Intermediate", "Advanced"
+  tags             String[]        @default([])
+  tableOfContents  String?
+  keyFeatures      String[]        @default([])
+  status           BookStatus      @default(PENDING_APPROVAL)
+  rejectionReason  String?
+  isFeatured       Boolean         @default(false)
+  totalPages       Int             @default(1)
+  averageRating    Float           @default(0)
+  totalRatings     Int             @default(0)
+  totalSales       Int             @default(0)
+  totalViews       Int             @default(0)
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  category         Category        @relation(fields: [categoryId], references: [id])
+  author           AuthorProfile   @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  files            BookFile[]
+  previews         BookPreview[]
+  cartItems        CartItem[]
+  wishlistItems    WishlistItem[]
+  orderItems       OrderItem[]
+  entitlements     Entitlement[]
+  reviews          Review[]
+  readingProgress  ReadingProgress[]
+  bookmarks        Bookmark[]
+
+  @@index([categoryId])
+  @@index([authorId])
+  @@index([status])
+  @@map("books")
+}
+
+model BookFile {
+  id          String   @id @default(uuid())
+  bookId      String
+  filePath    String
+  fileName    String
+  fileSize    Int
+  mimeType    String   @default("application/pdf")
+  checksum    String?
+  isPreview   Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  book        Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@map("book_files")
+}
+
+model BookPreview {
+  id               String   @id @default(uuid())
+  bookId           String
+  previewPath      String
+  samplePagesCount Int      @default(5)
+  createdAt        DateTime @default(now())
+
+  book             Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@map("book_previews")
+}
+
+model WishlistItem {
+  id        String   @id @default(uuid())
+  userId    String
+  bookId    String
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book      Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookId])
+  @@map("wishlist_items")
+}
+
+model CartItem {
+  id            String   @id @default(uuid())
+  userId        String
+  bookId        String
+  priceSnapshot Int      // in paise
+  createdAt     DateTime @default(now())
+
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book          Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookId])
+  @@map("cart_items")
+}
+
+model Order {
+  id            String         @id @default(uuid())
+  orderNumber   String         @unique
+  userId        String
+  subtotal      Int            // in paise
+  discount      Int            @default(0) // in paise
+  tax           Int            @default(0) // in paise
+  totalAmount   Int            // in paise
+  currency      String         @default("INR")
+  status        OrderStatus    @default(PENDING)
+  paymentMethod String         @default("RAZORPAY_SANDBOX")
+  billingName   String?
+  billingEmail  String?
+  billingPhone  String?
+  couponCode    String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  user          User           @relation(fields: [userId], references: [id])
+  items         OrderItem[]
+  payment       Payment?
+  entitlements  Entitlement[]
+  redemptions   CouponRedemption[]
+
+  @@map("orders")
+}
+
+model OrderItem {
+  id                 String   @id @default(uuid())
+  orderId            String
+  bookId             String
+  authorId           String
+  price              Int      // price at time of purchase in paise
+  discountPrice      Int?     // in paise
+  authorEarnings     Int      // in paise (e.g. 85%)
+  platformCommission Int      // in paise (e.g. 15%)
+  createdAt          DateTime @default(now())
+
+  order              Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  book               Book     @relation(fields: [bookId], references: [id])
+
+  @@map("order_items")
+}
+
+model Payment {
+  id                String          @id @default(uuid())
+  orderId           String          @unique
+  userId            String
+  amount            Int             // in paise
+  currency          String          @default("INR")
+  provider          PaymentProvider @default(DEMO)
+  providerPaymentId String?
+  providerOrderId   String?
+  providerSignature String?
+  status            PaymentStatus   @default(PENDING)
+  rawResponse       String?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  order             Order           @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user              User            @relation(fields: [userId], references: [id])
+
+  @@map("payments")
+}
+
+model PaymentWebhookEvent {
+  id        String   @id @default(uuid())
+  eventId   String   @unique
+  eventType String
+  payload   String
+  status    String   @default("PROCESSED")
+  createdAt DateTime @default(now())
+
+  @@map("payment_webhook_events")
+}
+
+model Entitlement {
+  id               String    @id @default(uuid())
+  userId           String
+  bookId           String
+  orderId          String
+  accessGrantedAt  DateTime  @default(now())
+  isActive         Boolean   @default(true)
+  downloadCount    Int       @default(0)
+  lastDownloadedAt DateTime?
+  createdAt        DateTime  @default(now())
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book             Book      @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  order            Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookId])
+  @@map("entitlements")
+}
+
+model Review {
+  id                 String   @id @default(uuid())
+  bookId             String
+  userId             String
+  rating             Int      // 1 to 5
+  title              String
+  comment            String
+  isVerifiedPurchase Boolean  @default(true)
+  status             String   @default("APPROVED") // APPROVED, PENDING, REJECTED
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  book               Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+  user               User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([bookId, userId])
+  @@map("reviews")
+}
+
+model Coupon {
+  id           String             @id @default(uuid())
+  code         String             @unique
+  description  String?
+  discountType DiscountType       @default(PERCENTAGE)
+  discountValue Int               // e.g. 10 for 10% or 5000 for ₹50
+  minOrderValue Int               @default(0) // in paise
+  maxDiscount   Int?              // in paise
+  validFrom    DateTime           @default(now())
+  validUntil   DateTime
+  usageLimit   Int                @default(100)
+  usageCount   Int                @default(0)
+  perUserLimit Int                @default(1)
+  isActive     Boolean            @default(true)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  redemptions  CouponRedemption[]
+
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id              String   @id @default(uuid())
+  couponId        String
+  userId          String
+  orderId         String
+  discountApplied Int      // in paise
+  redeemedAt      DateTime @default(now())
+
+  coupon          Coupon   @relation(fields: [couponId], references: [id])
+  user            User     @relation(fields: [userId], references: [id])
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("coupon_redemptions")
+}
+
+model CommissionRule {
+  id            String   @id @default(uuid())
+  name          String
+  percentage    Float    @default(15.0)
+  effectiveFrom DateTime @default(now())
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+
+  @@map("commission_rules")
+}
+
+model LedgerEntry {
+  id           String        @id @default(uuid())
+  authorId     String
+  orderId      String?
+  type         LedgerType
+  amount       Int           // in paise
+  balanceAfter Int           // in paise
+  description  String
+  createdAt    DateTime      @default(now())
+
+  author       AuthorProfile @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@map("ledger_entries")
+}
+
+model PayoutRequest {
+  id                       String        @id @default(uuid())
+  payoutNumber             String        @unique
+  authorId                 String
+  amount                   Int           // in paise
+  availableBalanceSnapshot Int           // in paise
+  status                   PayoutStatus  @default(REQUESTED)
+  rejectionReason          String?
+  settlementReference      String?
+  processedAt              DateTime?
+  processedBy              String?
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+
+  author                   AuthorProfile @relation(fields: [authorId], references: [id], onDelete: Cascade)
+
+  @@map("payout_requests")
+}
+
+model Notification {
+  id        String           @id @default(uuid())
+  userId    String
+  title     String
+  message   String
+  type      NotificationType @default(SYSTEM)
+  link      String?
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+model SupportTicket {
+  id           String           @id @default(uuid())
+  ticketNumber String           @unique
+  userId       String
+  subject      String
+  category     String           @default("GENERAL")
+  priority     String           @default("MEDIUM")
+  status       TicketStatus     @default(OPEN)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  user         User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages     SupportMessage[]
+
+  @@map("support_tickets")
+}
+
+model SupportMessage {
+  id         String        @id @default(uuid())
+  ticketId   String
+  senderId   String
+  senderRole Role          @default(USER)
+  message    String
+  createdAt  DateTime      @default(now())
+
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  sender     User          @relation(fields: [senderId], references: [id], onDelete: Cascade)
+
+  @@map("support_messages")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  actorRole  Role?
+  action     String
+  entityType String
+  entityId   String?
+  metadata   String?  // JSON string
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  actor      User?    @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+}
+
+model PlatformSetting {
+  id          String   @id @default(uuid())
+  key         String   @unique
+  value       String
+  description String?
+  updatedAt   DateTime @updatedAt
+
+  @@map("platform_settings")
+}
+
+model ReadingProgress {
+  id              String   @id @default(uuid())
+  userId          String
+  bookId          String
+  currentPage     Int      @default(1)
+  totalPages      Int      @default(1)
+  progressPercent Float    @default(0)
+  lastReadAt      DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book            Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, bookId])
+  @@map("reading_progress")
+}
+
+model Bookmark {
+  id         String   @id @default(uuid())
+  userId     String
+  bookId     String
+  pageNumber Int
+  note       String?
+  createdAt  DateTime @default(now())
+
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  book       Book     @relation(fields: [bookId], references: [id], onDelete: Cascade)
+
+  @@map("bookmarks")
+}
