@@ -44,6 +44,7 @@ import { UserCart } from './pages/user/UserCart';
 import { UserCheckout } from './pages/user/UserCheckout';
 import { UserPaymentResult } from './pages/user/UserPaymentResult';
 import { UserProfile } from './pages/user/UserProfile';
+import { UserReviews } from './pages/user/UserReviews';
 import { UserNotifications } from './pages/user/UserNotifications';
 import { UserSettings } from './pages/user/UserSettings';
 import { UserSupport } from './pages/user/UserSupport';
@@ -53,23 +54,36 @@ import { UserReader } from './pages/user/UserReader';
 import { AuthorDashboard } from './pages/author/AuthorDashboard';
 import { AuthorBooks } from './pages/author/AuthorBooks';
 import { AuthorAddBook } from './pages/author/AuthorAddBook';
+import { AuthorEditBook } from './pages/author/AuthorEditBook';
 import { AuthorBookDetail } from './pages/author/AuthorBookDetail';
+import { AuthorApprovals } from './pages/author/AuthorApprovals';
 import { AuthorSales } from './pages/author/AuthorSales';
+import { AuthorEarnings } from './pages/author/AuthorEarnings';
 import { AuthorPayouts } from './pages/author/AuthorPayouts';
 import { AuthorReviews } from './pages/author/AuthorReviews';
 import { AuthorProfile } from './pages/author/AuthorProfile';
+import { AuthorNotifications } from './pages/author/AuthorNotifications';
+import { AuthorSettings } from './pages/author/AuthorSettings';
 import { AuthorApprovalStatus } from './pages/author/AuthorApprovalStatus';
 
 // Admin Pages
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminUsers } from './pages/admin/AdminUsers';
+import AdminAuthors from './pages/admin/AdminAuthors';
 import AdminAuthorApplications from './pages/admin/AdminAuthorApplications';
 import AdminBookApprovals from './pages/admin/AdminBookApprovals';
 import AdminBooks from './pages/admin/AdminBooks';
 import AdminCategories from './pages/admin/AdminCategories';
 import AdminTransactions from './pages/admin/AdminTransactions';
 import AdminOrders from './pages/admin/AdminOrders';
+import AdminRefunds from './pages/admin/AdminRefunds';
+import AdminCommission from './pages/admin/AdminCommission';
 import AdminPayouts from './pages/admin/AdminPayouts';
+import AdminReviews from './pages/admin/AdminReviews';
+import AdminReports from './pages/admin/AdminReports';
+import AdminSupport from './pages/admin/AdminSupport';
+import AdminAuditLogs from './pages/admin/AdminAuditLogs';
+import AdminSettings from './pages/admin/AdminSettings';
 
 export const App: React.FC = () => {
   return (
@@ -122,6 +136,7 @@ export const App: React.FC = () => {
                   <Route path="checkout" element={<UserCheckout />} />
                   <Route path="payment-result" element={<UserPaymentResult />} />
                   <Route path="profile" element={<UserProfile />} />
+                  <Route path="reviews" element={<UserReviews />} />
                   <Route path="notifications" element={<UserNotifications />} />
                   <Route path="settings" element={<UserSettings />} />
                   <Route path="support" element={<UserSupport />} />
@@ -134,11 +149,16 @@ export const App: React.FC = () => {
                   <Route path="books" element={<AuthorBooks />} />
                   <Route path="books/new" element={<AuthorAddBook />} />
                   <Route path="books/:bookId" element={<AuthorBookDetail />} />
+                  <Route path="books/:bookId/edit" element={<AuthorEditBook />} />
+                  <Route path="approvals" element={<AuthorApprovals />} />
                   <Route path="sales" element={<AuthorSales />} />
-                  <Route path="ledger" element={<AuthorPayouts />} />
-                  <Route path="reviews" element={<AuthorReviews />} />
+                  <Route path="earnings" element={<AuthorEarnings />} />
+                  <Route path="ledger" element={<AuthorEarnings />} />
                   <Route path="payouts" element={<AuthorPayouts />} />
+                  <Route path="reviews" element={<AuthorReviews />} />
                   <Route path="profile" element={<AuthorProfile />} />
+                  <Route path="notifications" element={<AuthorNotifications />} />
+                  <Route path="settings" element={<AuthorSettings />} />
                 </Route>
 
                 {/* Admin Platform Console Protected Routes */}
@@ -146,17 +166,21 @@ export const App: React.FC = () => {
                   <Route index element={<Navigate to="/admin/dashboard" replace />} />
                   <Route path="dashboard" element={<AdminDashboard />} />
                   <Route path="users" element={<AdminUsers />} />
+                  <Route path="authors" element={<AdminAuthors />} />
                   <Route path="author-applications" element={<AdminAuthorApplications />} />
                   <Route path="book-approvals" element={<AdminBookApprovals />} />
                   <Route path="books" element={<AdminBooks />} />
                   <Route path="categories" element={<AdminCategories />} />
-                  <Route path="transactions" element={<AdminTransactions />} />
                   <Route path="orders" element={<AdminOrders />} />
+                  <Route path="transactions" element={<AdminTransactions />} />
+                  <Route path="refunds" element={<AdminRefunds />} />
+                  <Route path="commission" element={<AdminCommission />} />
                   <Route path="payouts" element={<AdminPayouts />} />
-                  <Route path="coupons" element={<AdminCategories />} />
-                  <Route path="reports" element={<AdminDashboard />} />
-                  <Route path="settings" element={<AdminDashboard />} />
-                  <Route path="audit-logs" element={<AdminDashboard />} />
+                  <Route path="reviews" element={<AdminReviews />} />
+                  <Route path="reports" element={<AdminReports />} />
+                  <Route path="support" element={<AdminSupport />} />
+                  <Route path="audit-logs" element={<AdminAuditLogs />} />
+                  <Route path="settings" element={<AdminSettings />} />
                 </Route>
 
                 {/* Catch-all redirect */}

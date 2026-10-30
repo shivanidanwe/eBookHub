@@ -6,6 +6,31 @@ import { authenticate, AuthenticatedRequest } from '../middlewares/auth';
 
 const router = Router();
 
+// GET /api/reviews/my (Current user's submitted reviews)
+router.get('/my', authenticate, async (req: AuthenticatedRequest, res, next) => {
+  try {
+    const userId = req.user!.id;
+    const reviews = await prisma.review.findMany({
+      where: { userId },
+      include: {
+        book: {
+          select: {
+            id: true,
+            title: true,
+            coverImage: true,
+            slug: true,
+            author: { select: { fullName: true } },
+          },
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return sendSuccess(res, reviews);
+  } catch (err) {
+    next(err);
+  }
+});
+
 // GET /api/reviews/book/:bookId
 router.get('/book/:bookId', async (req, res, next) => {
   try {

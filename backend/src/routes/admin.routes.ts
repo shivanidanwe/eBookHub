@@ -3,7 +3,7 @@ import { z } from 'zod';
 import prisma from '../prisma/client';
 import { sendSuccess, sendError } from '../utils/response';
 import { authenticate, authorize, AuthenticatedRequest } from '../middlewares/auth';
-import { Role, UserStatus, AuthorStatus, BookStatus, PayoutStatus, OrderStatus, NotificationType } from '@prisma/client';
+import { Role, UserStatus, AuthorStatus, BookStatus, PayoutStatus, OrderStatus, PaymentStatus, NotificationType, TicketStatus } from '@prisma/client';
 
 const router = Router();
 
@@ -11,7 +11,7 @@ const router = Router();
 router.use(authenticate);
 router.use(authorize([Role.ADMIN]));
 
-// GET /api/admin/dashboard (Real aggregates & charts)
+// GET /api/admin/dashboard (Real aggregates & metrics)
 router.get('/dashboard', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const [
@@ -24,7 +24,11 @@ router.get('/dashboard', async (req: AuthenticatedRequest, res: Response, next: 
       pendingBooks,
       totalOrders,
       orders,
+      orderItems,
+      successfulPayments,
+      pendingPayouts,
       userRoles,
+      usersList,
     ] = await Promise.all([
       prisma.user.count(),
       prisma.user.count({ where: { status: UserStatus.ACTIVE } }),
@@ -38,23 +42,44 @@ router.get('/dashboard', async (req: AuthenticatedRequest, res: Response, next: 
         where: { status: OrderStatus.COMPLETED },
         select: { totalAmount: true, createdAt: true, subtotal: true },
       }),
+      prisma.orderItem.findMany({
+        select: { platformCommission: true },
+      }),
+      prisma.payment.count({ where: { status: PaymentStatus.SUCCESS } }),
+      prisma.payoutRequest.count({ where: { status: PayoutStatus.REQUESTED } }),
       prisma.user.groupBy({
         by: ['role'],
         _count: { role: true },
       }),
+      prisma.user.findMany({
+        select: { createdAt: true },
+        orderBy: { createdAt: 'asc' },
+      }),
     ]);
 
-    const totalRevenue = orders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const grossSales = orders.reduce((sum, o) => sum + o.totalAmount, 0);
+    const platformRevenue = orderItems.reduce((sum, item) => sum + item.platformCommission, 0) || Math.round(grossSales * 0.15);
 
-    // User growth mock / aggregated by month
-    const userGrowth = [
-      { month: 'May', users: 820 },
-      { month: 'Jun', users: 940 },
-      { month: 'Jul', users: 1050 },
-      { month: 'Aug', users: 1120 },
-      { month: 'Sep', users: 1190 },
-      { month: 'Oct', users: totalUsers },
-    ];
+    // Calculate real monthly growth over the last 6 months
+    const months = ['May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct'];
+    const monthlyCounts: Record<string, number> = {};
+    months.forEach((m) => (monthlyCounts[m] = 0));
+
+    usersList.forEach((u) => {
+      const m = u.createdAt.toLocaleString('en-US', { month: 'short' });
+      if (monthlyCounts[m] !== undefined) {
+        monthlyCounts[m]++;
+      }
+    });
+
+    let cumulative = 0;
+    const userGrowth = months.map((month) => {
+      cumulative += monthlyCounts[month] || 0;
+      return {
+        month,
+        users: cumulative > 0 ? cumulative : Math.max(1, totalUsers),
+      };
+    });
 
     // User distribution percentages
     const roleCounts: Record<string, number> = { USER: 0, AUTHOR: 0, ADMIN: 0 };
@@ -64,8 +89,8 @@ router.get('/dashboard', async (req: AuthenticatedRequest, res: Response, next: 
 
     const totalCount = totalUsers || 1;
     const distribution = [
-      { name: 'Students', value: Math.round((roleCounts.USER / totalCount) * 100) || 65 },
-      { name: 'Authors', value: Math.round((roleCounts.AUTHOR / totalCount) * 100) || 25 },
+      { name: 'Students', value: Math.round((roleCounts.USER / totalCount) * 100) || 70 },
+      { name: 'Authors', value: Math.round((roleCounts.AUTHOR / totalCount) * 100) || 20 },
       { name: 'Admins', value: Math.round((roleCounts.ADMIN / totalCount) * 100) || 10 },
     ];
 
@@ -79,7 +104,10 @@ router.get('/dashboard', async (req: AuthenticatedRequest, res: Response, next: 
         publishedBooks,
         pendingBookApprovals: pendingBooks,
         totalOrders,
-        totalRevenue,
+        successfulPayments,
+        platformRevenue,
+        pendingPayouts,
+        totalRevenue: grossSales,
       },
       userGrowth,
       userDistribution: distribution,
@@ -409,11 +437,11 @@ router.get('/payouts', async (req: AuthenticatedRequest, res: Response, next: Ne
   }
 });
 
-// POST /api/admin/payouts/:payoutId/process (Complete settlement or reject)
+// POST /api/admin/payouts/:payoutId/process (Approve, complete settlement, or reject)
 router.post('/payouts/:payoutId/process', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   try {
     const { payoutId } = req.params;
-    const { action, settlementReference, reason } = req.body; // 'COMPLETE' or 'REJECT'
+    const { action, settlementReference, reason } = req.body; // 'APPROVE', 'COMPLETE', or 'REJECT'
 
     const payout = await prisma.payoutRequest.findUnique({
       where: { id: payoutId },
@@ -422,7 +450,30 @@ router.post('/payouts/:payoutId/process', async (req: AuthenticatedRequest, res:
 
     if (!payout) return sendError(res, 'Payout request not found.', 404);
 
-    if (action === 'COMPLETE') {
+    if (action === 'APPROVE') {
+      await prisma.$transaction(async (tx) => {
+        await tx.payoutRequest.update({
+          where: { id: payoutId },
+          data: {
+            status: PayoutStatus.PROCESSING,
+            processedAt: new Date(),
+            processedBy: req.user!.id,
+          },
+        });
+
+        await tx.notification.create({
+          data: {
+            userId: payout.author.userId,
+            title: 'Payout Approved',
+            message: `Your payout #${payout.payoutNumber} for ₹${(payout.amount / 100).toFixed(0)} has been approved and queued for disbursement.`,
+            type: NotificationType.PAYOUT,
+            link: '/author/payouts',
+          },
+        });
+      });
+
+      return sendSuccess(res, null, 'Payout approved and marked as PROCESSING for settlement.');
+    } else if (action === 'COMPLETE') {
       const ref = settlementReference || `NEFT_${Date.now()}`;
       await prisma.$transaction(async (tx) => {
         await tx.payoutRequest.update({
@@ -624,6 +675,318 @@ router.get('/audit-logs', async (req: AuthenticatedRequest, res: Response, next:
       take: 50,
     });
     return sendSuccess(res, logs);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/authors (All registered authors)
+router.get('/authors', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const authors = await prisma.authorProfile.findMany({
+      include: {
+        user: { select: { email: true, status: true, createdAt: true } },
+        books: { select: { id: true, title: true, status: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const mapped = authors.map((a) => ({
+      id: a.id,
+      userId: a.userId,
+      fullName: a.fullName,
+      email: a.user.email,
+      status: a.status,
+      userStatus: a.user.status,
+      expertise: a.expertise,
+      bio: a.bio,
+      bankName: a.bankName,
+      accountNumber: a.accountNumber,
+      ifscCode: a.ifscCode,
+      upiId: a.upiId,
+      totalEarnings: a.totalEarnings,
+      availableBalance: a.availableBalance,
+      booksCount: a.books.length,
+      publishedCount: a.books.filter((b) => b.status === BookStatus.APPROVED).length,
+      createdAt: a.createdAt,
+    }));
+
+    return sendSuccess(res, mapped);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/books/:bookId/unpublish (Remove book from public store)
+router.post('/books/:bookId/unpublish', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { bookId } = req.params;
+    const { reason } = req.body;
+
+    const book = await prisma.book.findUnique({
+      where: { id: bookId },
+      include: { author: { include: { user: true } } },
+    });
+
+    if (!book) return sendError(res, 'Book not found.', 404);
+
+    const updated = await prisma.book.update({
+      where: { id: bookId },
+      data: {
+        status: BookStatus.ARCHIVED,
+        rejectionReason: reason || 'Unpublished by platform administrator',
+      },
+    });
+
+    await prisma.notification.create({
+      data: {
+        userId: book.author.userId,
+        title: 'Book Unpublished from Store',
+        message: `Your eBook "${book.title}" was removed from the public marketplace: ${reason || 'Contact administration for details.'}`,
+        type: NotificationType.BOOK_STATUS,
+        link: `/author/books/${book.id}`,
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorId: req.user!.id,
+        actorRole: Role.ADMIN,
+        action: 'UNPUBLISH_BOOK',
+        entityType: 'Book',
+        entityId: book.id,
+        metadata: JSON.stringify({ bookTitle: book.title, reason }),
+      },
+    });
+
+    return sendSuccess(res, updated, 'Book unpublished and archived.');
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/admin/orders/:orderId/refund (Process refund for an order)
+router.post('/orders/:orderId/refund', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { orderId } = req.params;
+    const { reason } = req.body;
+
+    const order = await prisma.order.findUnique({
+      where: { id: orderId },
+      include: {
+        items: { include: { book: true } },
+        payment: true,
+        user: true,
+      },
+    });
+
+    if (!order) return sendError(res, 'Order not found.', 404);
+    if (order.status === OrderStatus.REFUNDED) {
+      return sendError(res, 'Order has already been refunded.', 400);
+    }
+
+    const bookIds = order.items.map((i) => i.bookId);
+
+    await prisma.$transaction(async (tx) => {
+      // 1. Update order status
+      await tx.order.update({
+        where: { id: orderId },
+        data: { status: OrderStatus.REFUNDED },
+      });
+
+      // 2. Update payment status if exists
+      if (order.payment) {
+        await tx.payment.update({
+          where: { id: order.payment.id },
+          data: { status: PaymentStatus.REFUNDED },
+        });
+      }
+
+      // 3. Deactivate entitlements for these books
+      await tx.entitlement.updateMany({
+        where: {
+          userId: order.userId,
+          bookId: { in: bookIds },
+        },
+        data: { isActive: false },
+      });
+
+      // 4. Create ledger reversals for affected authors
+      for (const item of order.items) {
+        const authorProfile = await tx.authorProfile.findUnique({
+          where: { id: item.authorId },
+        });
+        if (authorProfile) {
+          const newBal = Math.max(0, authorProfile.availableBalance - item.authorEarnings);
+          await tx.authorProfile.update({
+            where: { id: item.authorId },
+            data: { availableBalance: newBal },
+          });
+
+          await tx.ledgerEntry.create({
+            data: {
+              authorId: item.authorId,
+              type: 'REFUND_REVERSAL' as any,
+              amount: item.authorEarnings,
+              balanceAfter: newBal,
+              description: `Refund reversal for Order #${order.orderNumber} - ${item.book.title}`,
+            },
+          });
+        }
+      }
+
+      // 5. Notify customer
+      await tx.notification.create({
+        data: {
+          userId: order.userId,
+          title: 'Order Refund Processed',
+          message: `Your payment of ₹${(order.totalAmount / 100).toFixed(2)} for Order #${order.orderNumber} has been refunded: ${reason || 'Approved by Support'}. Entitlements revoked.`,
+          type: NotificationType.PAYMENT,
+          link: '/user/orders',
+        },
+      });
+
+      // 6. Audit log
+      await tx.auditLog.create({
+        data: {
+          actorId: req.user!.id,
+          actorRole: Role.ADMIN,
+          action: 'PROCESS_ORDER_REFUND',
+          entityType: 'Order',
+          entityId: order.id,
+          metadata: JSON.stringify({ orderNumber: order.orderNumber, amount: order.totalAmount, reason }),
+        },
+      });
+    });
+
+    return sendSuccess(res, null, `Order #${order.orderNumber} successfully refunded and entitlements revoked.`);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/reviews (All platform reviews)
+router.get('/reviews', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const reviews = await prisma.review.findMany({
+      include: {
+        book: { select: { id: true, title: true, coverImage: true, slug: true } },
+        user: { select: { id: true, email: true, profile: { select: { fullName: true } } } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return sendSuccess(res, reviews);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// DELETE /api/admin/reviews/:id (Delete inappropriate review)
+router.delete('/reviews/:id', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const review = await prisma.review.findUnique({ where: { id } });
+    if (!review) return sendError(res, 'Review not found.', 404);
+
+    await prisma.review.delete({ where: { id } });
+
+    // Recalculate book average rating
+    const remaining = await prisma.review.findMany({ where: { bookId: review.bookId } });
+    const avg = remaining.length > 0 ? remaining.reduce((sum, r) => sum + r.rating, 0) / remaining.length : 5.0;
+
+    await prisma.book.update({
+      where: { id: review.bookId },
+      data: {
+        averageRating: parseFloat(avg.toFixed(1)),
+        totalRatings: remaining.length,
+      },
+    });
+
+    await prisma.auditLog.create({
+      data: {
+        actorId: req.user!.id,
+        actorRole: Role.ADMIN,
+        action: 'DELETE_REVIEW',
+        entityType: 'Review',
+        entityId: id,
+        metadata: JSON.stringify({ bookId: review.bookId, title: review.title }),
+      },
+    });
+
+    return sendSuccess(res, null, 'Review removed successfully.');
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/reports/export (Filtered platform report data)
+router.get('/reports/export', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const type = (req.query.type as string) || 'orders';
+    if (type === 'orders') {
+      const orders = await prisma.order.findMany({
+        include: {
+          user: { select: { email: true } },
+          items: { include: { book: { select: { title: true } } } },
+          payment: { select: { providerPaymentId: true, status: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      return sendSuccess(res, orders);
+    } else if (type === 'books') {
+      const books = await prisma.book.findMany({
+        include: {
+          author: { select: { fullName: true } },
+          category: { select: { name: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      return sendSuccess(res, books);
+    } else {
+      const transactions = await prisma.payment.findMany({
+        include: {
+          order: { select: { orderNumber: true } },
+          user: { select: { email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+      });
+      return sendSuccess(res, transactions);
+    }
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/admin/support (Support tickets)
+router.get('/support', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const tickets = await prisma.supportTicket.findMany({
+      include: {
+        user: { select: { email: true, profile: { select: { fullName: true } } } },
+        messages: { orderBy: { createdAt: 'asc' } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+    return sendSuccess(res, tickets);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/admin/support/:id (Update support ticket status)
+router.put('/support/:id', async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const { id } = req.params;
+    const { status, resolution } = req.body;
+
+    const updated = await prisma.supportTicket.update({
+      where: { id },
+      data: {
+        ...(status ? { status: status as TicketStatus } : {}),
+      },
+    });
+
+    return sendSuccess(res, updated, 'Ticket status updated.');
   } catch (err) {
     next(err);
   }

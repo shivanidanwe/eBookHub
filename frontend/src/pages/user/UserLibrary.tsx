@@ -110,15 +110,17 @@ export const UserLibrary: React.FC = () => {
           ))}
         </div>
       ) : filteredItems.length === 0 ? (
-        <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center space-y-4">
-          <BookOpen className="w-12 h-12 text-slate-300 mx-auto" />
-          <h3 className="text-lg font-bold text-slate-900">No books found in this view</h3>
+        <div className="bg-white rounded-3xl border border-slate-200 p-12 text-center space-y-3">
+          <BookOpen className="w-12 h-12 text-blue-300 mx-auto" />
+          <h3 className="text-lg font-bold text-slate-900">No purchased books yet.</h3>
           <p className="text-xs text-slate-500 max-w-sm mx-auto">
-            Browse our catalog to discover and purchase curriculum-aligned textbooks.
+            Browse the catalog to find your next eBook.
           </p>
-          <Link to="/books" className="inline-block px-5 py-2.5 bg-brand-600 text-white font-bold text-xs rounded-xl">
-            Browse Books
-          </Link>
+          <div className="pt-2">
+            <Link to="/books" className="inline-block px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition">
+              Browse Books
+            </Link>
+          </div>
         </div>
       ) : (
         <div className="space-y-4">
